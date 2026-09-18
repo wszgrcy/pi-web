@@ -71,6 +71,15 @@ jobs:
             const fs = require("fs");
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
             pkg.name = process.env.TARGET_NAME;
+            pkg.homepage = "https://github.com/wszgrcy/pi-web#readme";
+            pkg.repository = {
+              type: "git",
+              url: "git+https://github.com/wszgrcy/pi-web.git"
+            };
+            pkg.bugs = {
+              url: "https://github.com/wszgrcy/pi-web/issues"
+            };
+
             fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           NODE
           npm install --package-lock-only --ignore-scripts
