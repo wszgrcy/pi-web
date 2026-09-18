@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types: [completed]
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */3 * * *'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      different: ${{ steps.vercmp.outputs.different }}
+      age: ${{ steps.vercmp.outputs.age }}
+      cyia: ${{ steps.vercmp.outputs.cyia }}
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.19.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Compare published versions
+        id: vercmp
+        run: |
+          set -euo pipefail
+          age=$(npm view @agegr/pi-web version 2>/dev/null || true)
+          cyia=$(npm view @cyia/pi-web  version 2>/dev/null || true)
+          echo "@agegr/pi-web = ${age:-<not published>}"
+          echo "@cyia/pi-web  = ${cyia:-<not published>}"
+          echo "age=${age}"   >> "$GITHUB_OUTPUT"
+          echo "cyia=${cyia}" >> "$GITHUB_OUTPUT"
+          if [ "$age" != "$cyia" ]; then
+            echo "different=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "different=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.different == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: agegr/pi-web
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.19.0
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Rewrite package.json to @cyia/pi-web
+        env:
+          TARGET_NAME: '@cyia/pi-web'
+          TARGET_VERSION: ${{ needs.check.outputs.age }}
+        run: |
+          set -euo pipefail
+          echo "Rewriting -> ${TARGET_NAME}@${TARGET_VERSION}"
+          node - <<'NODE'
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.name = process.env.TARGET_NAME;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          NODE
+          npm install --package-lock-only --ignore-scripts
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+
+      - run: |
+          npm run build
+          npm publish --access public
