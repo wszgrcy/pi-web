@@ -108,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run build
+          mkdir -p .fork/docker/packages
           npm pack --pack-destination .fork/docker/packages
 
       # 强制构建只出镜像，不动 npm
@@ -129,6 +130,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .fork/docker
+          file: .fork/docker/dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/pi-web-custom:${{ needs.check.outputs.age }}
