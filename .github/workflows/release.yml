@@ -7,6 +7,11 @@ on:
   # push:
   #   branches: [main]
   workflow_dispatch:
+    inputs:
+      force:
+        type: boolean
+        default: false
+        description: '强制构建：跳过 npm 发布，只构建并推送 Docker 镜像'
   schedule:
     - cron: '0 */3 * * *'
 
@@ -23,6 +28,7 @@ jobs:
       different: ${{ steps.vercmp.outputs.different }}
       age: ${{ steps.vercmp.outputs.age }}
       cyia: ${{ steps.vercmp.outputs.cyia }}
+      force: ${{ steps.vercmp.outputs.force }}
     steps:
       - uses: actions/setup-node@v7
         with:
@@ -39,6 +45,9 @@ jobs:
           echo "@cyia/pi-web  = ${cyia:-<not published>}"
           echo "age=${age}"   >> "$GITHUB_OUTPUT"
           echo "cyia=${cyia}" >> "$GITHUB_OUTPUT"
+          [ -n "$age" ] || { echo "::error::@agegr/pi-web has no published version, cannot pick an image tag"; exit 1; }
+          if [ "${{ inputs.force }}" = "true" ]; then force=true; else force=false; fi
+          echo "force=$force" >> "$GITHUB_OUTPUT"
           if [ "$age" != "$cyia" ]; then
             echo "different=true"  >> "$GITHUB_OUTPUT"
           else
@@ -47,7 +56,7 @@ jobs:
 
   release:
     needs: check
-    if: needs.check.outputs.different == 'true'
+    if: needs.check.outputs.different == 'true' || needs.check.outputs.force == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -95,12 +104,16 @@ jobs:
         with:
           path: .fork
 
-      - name: Build, publish and pack
+      - name: Build and pack
         run: |
           set -euo pipefail
           npm run build
-          npm publish --access public --provenance
           npm pack --pack-destination .fork/docker/packages
+
+      # 强制构建只出镜像，不动 npm
+      - name: Publish to npm
+        if: needs.check.outputs.force != 'true'
+        run: npm publish --access public --provenance
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
