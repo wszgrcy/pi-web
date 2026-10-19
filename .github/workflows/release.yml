@@ -12,6 +12,10 @@ on:
         type: boolean
         default: false
         description: '强制构建：跳过 npm 发布，只构建并推送 Docker 镜像'
+      suffix:
+        type: string
+        default: ''
+        description: '镜像 tag 后缀：tag 变成 0.12.2-xx；填了也视为强制构建'
   schedule:
     - cron: '0 */3 * * *'
 
@@ -29,6 +33,7 @@ jobs:
       age: ${{ steps.vercmp.outputs.age }}
       cyia: ${{ steps.vercmp.outputs.cyia }}
       force: ${{ steps.vercmp.outputs.force }}
+      imagetag: ${{ steps.vercmp.outputs.imagetag }}
     steps:
       - uses: actions/setup-node@v7
         with:
@@ -46,8 +51,10 @@ jobs:
           echo "age=${age}"   >> "$GITHUB_OUTPUT"
           echo "cyia=${cyia}" >> "$GITHUB_OUTPUT"
           [ -n "$age" ] || { echo "::error::@agegr/pi-web has no published version, cannot pick an image tag"; exit 1; }
-          if [ "${{ inputs.force }}" = "true" ]; then force=true; else force=false; fi
+          if [ "${{ inputs.force }}" = "true" ] || [ -n "${{ inputs.suffix }}" ]; then force=true; else force=false; fi
           echo "force=$force" >> "$GITHUB_OUTPUT"
+          imagetag="$age-${{ inputs.suffix }}"
+          echo "imagetag=$imagetag" >> "$GITHUB_OUTPUT"
           if [ "$age" != "$cyia" ]; then
             echo "different=true"  >> "$GITHUB_OUTPUT"
           else
@@ -133,7 +140,7 @@ jobs:
           file: .fork/docker/dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/pi-web-custom:${{ needs.check.outputs.age }}
+            ghcr.io/${{ github.repository_owner }}/pi-web-custom:${{ needs.check.outputs.imagetag }}
             ghcr.io/${{ github.repository_owner }}/pi-web-custom:latest
 
 

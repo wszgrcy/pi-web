@@ -1,13 +1,48 @@
-FROM node:24-bookworm
+FROM ubuntu:26.04
 
-# root 操作必须全部放在降权之前（apt / npm -g 都要求 root）
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && git config --system --add safe.directory '*'
+    && apt-get install -y --no-install-recommends \
+       ca-certificates curl wget unzip zip xz-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && apt-get update \
+ARG FNM_VERSION=1.39.0
+RUN curl -fsSL -o /tmp/fnm.zip \
+      "https://github.com/Schniz/fnm/releases/download/v${FNM_VERSION}/fnm-linux.zip" \
+    && unzip -o /tmp/fnm.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/fnm \
+    && rm /tmp/fnm.zip \
+    && fnm --version
+
+ENV FNM_DIR=/opt/fnm
+ARG NODE_VERSION=24.22.0
+ENV PATH="/opt/node-default/bin:${PATH}"
+RUN fnm install "${NODE_VERSION}" \
+    && fnm default "${NODE_VERSION}" \
+    && ln -sfn "${FNM_DIR}/node-versions/v${NODE_VERSION}/installation" /opt/node-default \
+    && node -v \
+    && npm -v
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       mesa-vulkan-drivers vulkan-tools libvulkan1 \
+       libgl1 libegl1 libglx0 libgl1-mesa-dri libegl-mesa0 libglx-mesa0 libgomp1 \
+       libx11-6 libxext6 libxfixes3 libxi6 libxrender1 libxrandr2 libxinerama1 \
+       libxcursor1 libxxf86vm1 libsm6 libxkbcommon0 libxkbcommon-x11-0 \
+       libdrm2 libgbm1 libasound2t64 libpulse0 libdbus-1-3 libudev1 \
+       xvfb x11vnc novnc websockify x11-utils openbox \
+       openssh-server openssh-client \
+       python3 python3-venv python3-pip python-is-python3 git procps \
+       fonts-dejavu-core fonts-liberation \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*' \
+    && mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && python -V && python3 -V && pip -V
+
+ADD https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb /tmp/chrome.deb
+RUN apt-get update \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb \
     && rm -f /tmp/chrome.deb \
     && rm -rf /var/lib/apt/lists/* \
@@ -22,13 +57,15 @@ RUN npm install -g pnpm@latest \
     && pnpm --version
 
 # pi-web：直接装构建上下文里的 tgz（依赖会照常从 registry 装）
-# CI 用 npm pack 产出；本地构建先跑一句 npm pack --pack-destination docker/packages
+# CI 用 npm pack 产出；本地构建先跑 npm pack --pack-destination docker/packages
 COPY packages/*.tgz /tmp/pkg/
 RUN npm install -g /tmp/pkg/*.tgz \
     && rm -rf /tmp/pkg
 
 ENV PI_WEB_HOSTNAME=0.0.0.0 \
-    PI_WEB_NO_OPEN=1
+    PI_WEB_NO_OPEN=1 \
+    DISPLAY=:1 \
+    MESA_VK_WSI_DEBUG=sw
 
 WORKDIR /workspace
-EXPOSE 30141
+EXPOSE 30141 22 5900 6080
