@@ -67,6 +67,15 @@ RUN apt-get update \
 RUN npm install -g pnpm@latest \
     && pnpm --version
 
+ARG UV_VERSION=0.13.3
+RUN curl -fsSL -o /tmp/uv-install.sh "https://astral.sh/uv/${UV_VERSION}/install.sh" \
+    && UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh /tmp/uv-install.sh \
+    && rm -f /tmp/uv-install.sh \
+    && uv --version \
+    && uvx --version
+
+ENV UV_LINK_MODE=copy
+
 # pi-web：直接装构建上下文里的 tgz（依赖会照常从 registry 装）
 # CI 用 npm pack 产出；本地构建先跑 npm pack --pack-destination docker/packages
 COPY packages/*.tgz /tmp/pkg/
