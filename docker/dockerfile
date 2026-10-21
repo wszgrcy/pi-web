@@ -27,7 +27,9 @@ RUN fnm install "${NODE_VERSION}" \
     && ln -sfn "${FNM_DIR}/node-versions/v${NODE_VERSION}/installation" /opt/node-default \
     && node -v \
     && npm -v
-
+RUN sed -i 's|^PATH="|PATH="/opt/node-default/bin:|' /etc/environment \
+    && [ "$(grep -c '^PATH=' /etc/environment)" = "1" ] \
+    && grep -q '^PATH="/opt/node-default/bin:' /etc/environment
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        mesa-vulkan-drivers vulkan-tools libvulkan1 \
