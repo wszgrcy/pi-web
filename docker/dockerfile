@@ -54,16 +54,31 @@ RUN ldd /usr/bin/Xvfb | tee /tmp/ldd.txt \
     && /usr/bin/Xvfb -help 2>&1 | grep -q -- '-glamor' \
     && /usr/bin/Xvfb -help 2>&1 | grep -q -- '-dri'
 
-ADD https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb /tmp/chrome.deb
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
-    && rm -f /tmp/chrome.deb \
-    && rm -rf /var/lib/apt/lists/* \
-    && google-chrome --version
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji \
+    && apt-get install -y --no-install-recommends \
+       libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+       libxcomposite1 libxdamage1 libxres1 libatspi2.0-0t64 \
+       libcairo2 libpango-1.0-0 libglib2.0-0t64 libfontconfig1 libfreetype6 \
+       libharfbuzz0b libfribidi0 libthai0 libdatrie1 libgraphite2-3 \
+       libavahi-client3 libavahi-common3 \
+       libgnutls30t64 libnettle8t64 libhogweed6t64 libidn2-0 libunistring5 \
+       libtasn1-6 libp11-kit0 libkrb5-3 libgssapi-krb5-2 libk5crypto3 \
+       libkeyutils1 libkrb5support0 libcom-err2 libselinux1 libmount1 libblkid1 \
+       libsystemd0 libatomic1 libexpat1 libffi8 libgmp10 libbrotli1 libbz2-1.0 \
+       libpng16-16t64 libpcre2-8-0 libxcb1 libxcb-render0 libxcb-shm0 \
+       libxau6 libxdmcp6 libzstd1 zlib1g libgcc-s1 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       fonts-noto-cjk fonts-noto-color-emoji \
+       fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation2 \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN test "$(fc-list | grep -ciE 'carlito|caladea')" -ge 2 \
+    && echo "[fonts] Windows 度量兼容字体就位: $(fc-list | grep -oiE 'Carlito|Caladea' | sort -u | tr '\n' ' ')"
 
 # pnpm：容器里跑 skill 安装 / 项目依赖时要用，corepack 在部分 node 镜像里已移除，直接全局装
 RUN npm install -g pnpm@latest \
