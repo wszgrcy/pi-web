@@ -1,127 +1,97 @@
 name: Release
 
 on:
-  # workflow_run:
-  #   workflows: ["CI"]
-  #   types: [completed]
-  # push:
-  #   branches: [main]
   workflow_dispatch:
     inputs:
-      force:
-        type: boolean
-        default: false
-        description: '强制构建：跳过 npm 发布，只构建并推送 Docker 镜像'
       suffix:
         type: string
         default: ''
-        description: '镜像 tag 后缀：tag 变成 0.12.2-xx；填了也视为强制构建'
+        description: '镜像 tag 后缀：tag 变成 0.12.2-xx（同一上游版本重打镜像时用）'
+      version:
+        type: string
+        default: ''
+        description: '指定 @agegr/pi-web 版本；留空取 npm 上的最新版'
   schedule:
     - cron: '0 */3 * * *'
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
   packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/pi-web-custom
+  PKG: '@agegr/pi-web'
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      different: ${{ steps.vercmp.outputs.different }}
-      age: ${{ steps.vercmp.outputs.age }}
-      cyia: ${{ steps.vercmp.outputs.cyia }}
-      force: ${{ steps.vercmp.outputs.force }}
-      imagetag: ${{ steps.vercmp.outputs.imagetag }}
+      version: ${{ steps.ver.outputs.version }}
+      imagetag: ${{ steps.ver.outputs.imagetag }}
+      build: ${{ steps.exists.outputs.build }}
     steps:
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.19.0
-          registry-url: https://registry.npmjs.org
-
-      - name: Compare published versions
-        id: vercmp
-        run: |
-          set -euo pipefail
-          age=$(npm view @agegr/pi-web version 2>/dev/null || true)
-          cyia=$(npm view @cyia/pi-web  version 2>/dev/null || true)
-          echo "@agegr/pi-web = ${age:-<not published>}"
-          echo "@cyia/pi-web  = ${cyia:-<not published>}"
-          echo "age=${age}"   >> "$GITHUB_OUTPUT"
-          echo "cyia=${cyia}" >> "$GITHUB_OUTPUT"
-          [ -n "$age" ] || { echo "::error::@agegr/pi-web has no published version, cannot pick an image tag"; exit 1; }
-          if [ "${{ inputs.force }}" = "true" ] || [ -n "${{ inputs.suffix }}" ]; then force=true; else force=false; fi
-          echo "force=$force" >> "$GITHUB_OUTPUT"
-          imagetag="$age-${{ inputs.suffix }}"
-          echo "imagetag=$imagetag" >> "$GITHUB_OUTPUT"
-          if [ "$age" != "$cyia" ]; then
-            echo "different=true"  >> "$GITHUB_OUTPUT"
-          else
-            echo "different=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  release:
-    needs: check
-    if: needs.check.outputs.different == 'true' || needs.check.outputs.force == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          repository: agegr/pi-web
-
       - uses: actions/setup-node@v7
         with:
           node-version: 24.15
-          cache: npm
-          registry-url: https://registry.npmjs.org
 
-      - name: Rewrite package.json to @cyia/pi-web
+      - name: Resolve target version
+        id: ver
         env:
-          TARGET_NAME: '@cyia/pi-web'
-          TARGET_VERSION: ${{ needs.check.outputs.age }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SUFFIX: ${{ inputs.suffix }}
         run: |
           set -euo pipefail
-          echo "Rewriting -> ${TARGET_NAME}@${TARGET_VERSION}"
-          node - <<'NODE'
-            const fs = require("fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.name = process.env.TARGET_NAME;
-            pkg.homepage = "https://github.com/wszgrcy/pi-web#readme";
-            pkg.repository = {
-              type: "git",
-              url: "git+https://github.com/wszgrcy/pi-web.git"
-            };
-            pkg.bugs = {
-              url: "https://github.com/wszgrcy/pi-web/issues"
-            };
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version=$(npm view "$PKG" version 2>/dev/null || true)
+          fi
+          [ -n "$version" ] || { echo "::error::cannot resolve $PKG version"; exit 1; }
+          imagetag="${version}${INPUT_SUFFIX:+-${INPUT_SUFFIX}}"
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "imagetag=$imagetag" >> "$GITHUB_OUTPUT"
+          echo "$PKG = $version  ->  $IMAGE:$imagetag"
 
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-          NODE
-          npm install --package-lock-only --ignore-scripts
-
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm test
-
-      - name: Checkout this repo (docker files)
-        uses: actions/checkout@v7
+      - name: Log in to GHCR
+        if: github.event_name == 'schedule'
+        uses: docker/login-action@v4
         with:
-          path: .fork
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and pack
+      - name: Skip when image tag already exists
+        id: exists
+        if: github.event_name == 'schedule'
+        env:
+          IMAGETAG: ${{ steps.ver.outputs.imagetag }}
         run: |
           set -euo pipefail
-          npm run build
-          mkdir -p .fork/docker/packages
-          npm pack --pack-destination .fork/docker/packages
+          if docker buildx imagetools inspect "$IMAGE:$IMAGETAG" >/dev/null 2>&1; then
+            echo "image tag $IMAGE:$IMAGETAG already exists, nothing to do"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      # 强制构建只出镜像，不动 npm
-      - name: Publish to npm
-        if: needs.check.outputs.force != 'true'
-        run: npm publish --access public --provenance
+  image:
+    needs: check
+    if: github.event_name != 'schedule' || needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compute image tags
+        id: tags
+        env:
+          IMAGETAG: ${{ needs.check.outputs.imagetag }}
+          INPUT_SUFFIX: ${{ inputs.suffix }}
+        run: |
+          set -euo pipefail
+          tags="$IMAGE:$IMAGETAG"
+          if [ -z "$INPUT_SUFFIX" ]; then tags="$tags,$IMAGE:latest"; fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -136,11 +106,9 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
-          context: .fork/docker
-          file: .fork/docker/dockerfile
+          context: docker
+          file: docker/dockerfile
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/pi-web-custom:${{ needs.check.outputs.imagetag }}
-            ghcr.io/${{ github.repository_owner }}/pi-web-custom:latest
-
-
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args:
+            PI_WEB_VERSION=${{ needs.check.outputs.version }}
