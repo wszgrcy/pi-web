@@ -80,6 +80,11 @@ RUN apt-get update \
 RUN test "$(fc-list | grep -ciE 'carlito|caladea')" -ge 2 \
     && echo "[fonts] Windows 度量兼容字体就位: $(fc-list | grep -oiE 'Carlito|Caladea' | sort -u | tr '\n' ' ')"
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsecret-1-0 libsecret-common \
+    libpython3-dev python3-dev \
+    p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
 # pnpm：容器里跑 skill 安装 / 项目依赖时要用，corepack 在部分 node 镜像里已移除，直接全局装
 RUN npm install -g pnpm@latest \
     && pnpm --version
